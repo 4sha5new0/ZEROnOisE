@@ -3,12 +3,16 @@ name: Build ZEROnOisE APK
 on:
   push:
     branches: [ main, master ]
-  workflow_dispatch:   # 手動トリガーも可能
+  workflow_dispatch:
+
+# Node.js 24 を使用（20系の deprecation warning を解消）
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       # ── ソース取得 ──────────────────────────────────────────────────────────
@@ -22,32 +26,30 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      # ── Android SDK ─────────────────────────────────────────────────────────
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install SDK components
+      # ── Android SDK / NDK / CMake ────────────────────────────────────────────
+      # ubuntu-latest に ANDROID_HOME / sdkmanager がプリインストール済み。
+      # 外部アクション (android-actions/setup-android, nttld/setup-ndk) を
+      # 使わず直接 sdkmanager で管理することで Node.js 依存を排除する。
+      - name: Install SDK components (NDK + CMake)
         run: |
-          sdkmanager --install \
+          # sdkmanager のパスを明示
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+
+          # ライセンス一括承諾
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+
+          # 必要コンポーネントをインストール
+          "$SDKMANAGER" \
             "platforms;android-29" \
             "build-tools;34.0.0" \
-            "platform-tools"
+            "ndk;26.3.11579264" \
+            "cmake;3.22.1"
 
-      # ── Android NDK r26d ────────────────────────────────────────────────────
-      - name: Setup Android NDK
-        uses: nttld/setup-ndk@v1
-        id: setup-ndk
-        with:
-          ndk-version: r26d
-          add-to-path: true
+          # パスを後続ステップに公開
+          echo "NDK_HOME=$ANDROID_HOME/ndk/26.3.11579264" >> $GITHUB_ENV
+          echo "$ANDROID_HOME/cmake/3.22.1/bin" >> $GITHUB_PATH
 
-      # ── CMake 3.22.1 ────────────────────────────────────────────────────────
-      - name: Setup CMake
-        uses: jwlawson/actions-setup-cmake@v2
-        with:
-          cmake-version: '3.22.1'
-
-      # ── Gradle キャッシュ（ビルド高速化）───────────────────────────────────
+      # ── Gradle キャッシュ ────────────────────────────────────────────────────
       - name: Cache Gradle
         uses: actions/cache@v4
         with:
@@ -57,7 +59,7 @@ jobs:
           key: gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: gradle-
 
-      # ── CMake / FetchContent キャッシュ（minimp3 / libFLAC）────────────────
+      # ── CMake FetchContent キャッシュ（minimp3 / libFLAC）───────────────────
       - name: Cache CMake FetchContent
         uses: actions/cache@v4
         with:
@@ -68,8 +70,9 @@ jobs:
       # ── local.properties 生成 ───────────────────────────────────────────────
       - name: Write local.properties
         run: |
-          echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
-          echo "ndk.dir=${{ steps.setup-ndk.outputs.ndk-path }}" >> local.properties
+          echo "sdk.dir=$ANDROID_HOME"                     > local.properties
+          echo "ndk.dir=$ANDROID_HOME/ndk/26.3.11579264"  >> local.properties
+          cat local.properties
 
       # ── Debug APK ビルド ────────────────────────────────────────────────────
       - name: Build Debug APK
@@ -80,15 +83,15 @@ jobs:
             --stacktrace \
             --no-daemon
 
-      # ── APK をアーティファクトとしてアップロード ────────────────────────────
+      # ── APK アップロード ────────────────────────────────────────────────────
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
           name: ZEROnOisE-debug-${{ github.run_number }}
           path: app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 30   # 30日間保持
+          retention-days: 30
 
-      # ── ビルド情報をサマリーに表示 ─────────────────────────────────────────
+      # ── ビルドサマリー ──────────────────────────────────────────────────────
       - name: Build Summary
         if: success()
         run: |
@@ -99,6 +102,6 @@ jobs:
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
           echo "| APK サイズ | $SIZE |" >> $GITHUB_STEP_SUMMARY
           echo "| ビルド番号 | #${{ github.run_number }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| コミット | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| コミット | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Actions → Artifacts** から APK をダウンロードできます。" >> $GITHUB_STEP_SUMMARY
