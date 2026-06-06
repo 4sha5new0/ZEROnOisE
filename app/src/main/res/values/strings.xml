@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ZEROnOisE</string>
+    <string name="permission_denied">ストレージ読み取り権限が必要です</string>
+    <string name="internal_storage">内部ストレージ</string>
+    <string name="sd_card">microSD</string>
+    <string name="notif_playing">再生中</string>
+    <string name="notif_paused">一時停止</string>
+    <string name="prev">前</string>
+    <string name="play">再生</string>
+    <string name="pause">一時停止</string>
+    <string name="next">次</string>
+</resources>

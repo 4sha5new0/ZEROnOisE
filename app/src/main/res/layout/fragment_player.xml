@@ -1,0 +1,312 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/bg_primary"
+    android:padding="0dp">
+
+    <!-- ── ヘッダー ─────────────────────────────────────────────────────── -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:orientation="horizontal"
+        android:paddingHorizontal="16dp"
+        android:gravity="center_vertical"
+        android:background="@color/bg_secondary">
+
+        <ImageButton
+            android:id="@+id/btn_back"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:src="@android:drawable/ic_media_previous"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:tint="@color/text_primary"/>
+
+        <View android:layout_width="0dp" android:layout_height="0dp"
+            android:layout_weight="1"/>
+
+        <ImageButton
+            android:id="@+id/btn_settings"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:src="@android:drawable/ic_menu_preferences"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:tint="@color/text_primary"/>
+    </LinearLayout>
+
+    <!-- ── アルバムアート（プレースホルダー）────────────────────────────── -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="2"
+        android:background="@color/bg_art"/>
+
+    <!-- ── トラック情報 ──────────────────────────────────────────────────── -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingHorizontal="20dp"
+        android:paddingTop="12dp"
+        android:paddingBottom="4dp">
+
+        <TextView
+            android:id="@+id/tv_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="18sp"
+            android:textColor="@color/text_primary"
+            android:textStyle="bold"
+            android:singleLine="true"
+            android:ellipsize="marquee"
+            android:marqueeRepeatLimit="marquee_forever"
+            android:focusable="true"
+            android:focusableInTouchMode="true"
+            android:text="—"/>
+
+        <TextView
+            android:id="@+id/tv_artist_album"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="13sp"
+            android:textColor="@color/text_secondary"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:paddingTop="2dp"
+            android:text=""/>
+    </LinearLayout>
+
+    <!-- ── 信号情報バー ──────────────────────────────────────────────────── -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@color/bg_info_bar"
+        android:paddingHorizontal="20dp"
+        android:paddingVertical="10dp"
+        android:layout_marginTop="8dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/tv_format"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="13sp"
+                android:textColor="@color/accent_blue"
+                android:textStyle="bold"
+                android:text="—"/>
+
+            <View android:layout_width="12dp" android:layout_height="1dp"/>
+
+            <TextView
+                android:id="@+id/tv_sample_rate"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="15sp"
+                android:textColor="@color/text_primary"
+                android:textStyle="bold"
+                android:text="—"/>
+
+            <View android:layout_width="8dp" android:layout_height="1dp"/>
+
+            <TextView
+                android:id="@+id/tv_bit_depth"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="13sp"
+                android:textColor="@color/text_secondary"
+                android:text=""/>
+
+            <View android:layout_width="0dp" android:layout_height="1dp"
+                android:layout_weight="1"/>
+
+            <TextView
+                android:id="@+id/tv_hires_badge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Hi-Res"
+                android:textSize="11sp"
+                android:textColor="@color/bg_primary"
+                android:background="@drawable/badge_hires"
+                android:paddingHorizontal="6dp"
+                android:paddingVertical="2dp"
+                android:visibility="gone"/>
+        </LinearLayout>
+
+        <!-- MQA バッジ行 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingTop="4dp"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/tv_mqa_badge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="11sp"
+                android:textColor="@color/bg_primary"
+                android:background="@drawable/badge_mqa"
+                android:paddingHorizontal="6dp"
+                android:paddingVertical="2dp"
+                android:visibility="gone"/>
+
+            <TextView
+                android:id="@+id/tv_mqa_sub"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="11sp"
+                android:textColor="@color/text_secondary"
+                android:paddingStart="8dp"
+                android:visibility="gone"/>
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- ── シークバー ────────────────────────────────────────────────────── -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingHorizontal="16dp"
+        android:gravity="center_vertical"
+        android:paddingTop="4dp">
+
+        <TextView
+            android:id="@+id/tv_time"
+            android:layout_width="44dp"
+            android:layout_height="wrap_content"
+            android:textSize="12sp"
+            android:textColor="@color/text_secondary"
+            android:text="0:00"/>
+
+        <SeekBar
+            android:id="@+id/seek_bar"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:progressTint="@color/accent_blue"
+            android:thumbTint="@color/accent_blue"/>
+
+        <TextView
+            android:id="@+id/tv_duration"
+            android:layout_width="44dp"
+            android:layout_height="wrap_content"
+            android:textSize="12sp"
+            android:textColor="@color/text_secondary"
+            android:gravity="end"
+            android:text="0:00"/>
+    </LinearLayout>
+
+    <!-- ── 再生コントロール ──────────────────────────────────────────────── -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="72dp"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:paddingVertical="8dp">
+
+        <ImageButton
+            android:id="@+id/btn_prev"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:src="@android:drawable/ic_media_previous"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:tint="@color/text_primary"/>
+
+        <ImageButton
+            android:id="@+id/btn_play_pause"
+            android:layout_width="72dp"
+            android:layout_height="72dp"
+            android:src="@android:drawable/ic_media_play"
+            android:background="@drawable/bg_play_button"
+            android:tint="@color/bg_primary"
+            android:layout_marginHorizontal="24dp"/>
+
+        <ImageButton
+            android:id="@+id/btn_next"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:src="@android:drawable/ic_media_next"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:tint="@color/text_primary"/>
+    </LinearLayout>
+
+    <!-- ── レベルメーター ───────────────────────────────────────────────── -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@color/bg_secondary"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="8dp">
+
+        <com.example.audioplayer.ui.LevelMeterView
+            android:id="@+id/level_meter_view"
+            android:layout_width="match_parent"
+            android:layout_height="24dp"/>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingTop="4dp">
+
+            <TextView
+                android:id="@+id/tv_level_l"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textSize="11sp"
+                android:textColor="@color/text_secondary"
+                android:fontFamily="monospace"
+                android:text="L  — dBFS"/>
+
+            <TextView
+                android:id="@+id/tv_level_r"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textSize="11sp"
+                android:textColor="@color/text_secondary"
+                android:fontFamily="monospace"
+                android:gravity="end"
+                android:text="R  — dBFS"/>
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- ── ステータスバー ────────────────────────────────────────────────── -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:background="@color/bg_secondary"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="6dp">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textSize="11sp"
+            android:textColor="@color/text_secondary"
+            android:text="ES9219C · AGLO"/>
+
+        <TextView
+            android:id="@+id/tv_stream_mode"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="11sp"
+            android:fontFamily="monospace"
+            android:textColor="@color/text_secondary"
+            android:text="—"/>
+    </LinearLayout>
+
+</LinearLayout>
