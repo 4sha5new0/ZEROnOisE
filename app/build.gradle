@@ -4,7 +4,7 @@ plugins {
 
 android {
     namespace 'com.example.audioplayer'
-    compileSdk 29
+    compileSdk 34          // ← ライブラリのコンパイル要件を満たすため 34
     ndkVersion "26.3.11579264"
 
     defaultConfig {

@@ -41,6 +41,7 @@ jobs:
           # 必要コンポーネントをインストール
           "$SDKMANAGER" \
             "platforms;android-29" \
+            "platforms;android-34" \
             "build-tools;34.0.0" \
             "ndk;26.3.11579264" \
             "cmake;3.22.1"
@@ -70,8 +71,7 @@ jobs:
       # ── local.properties 生成 ───────────────────────────────────────────────
       - name: Write local.properties
         run: |
-          echo "sdk.dir=$ANDROID_HOME"                     > local.properties
-          echo "ndk.dir=$ANDROID_HOME/ndk/26.3.11579264"  >> local.properties
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
           cat local.properties
 
       # ── Debug APK ビルド ────────────────────────────────────────────────────
