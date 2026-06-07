@@ -5,6 +5,7 @@ plugins {
 android {
     namespace 'com.example.audioplayer'
     compileSdk 29
+    ndkVersion "26.3.11579264"
 
     defaultConfig {
         applicationId "com.zeronoise.player"
