@@ -7,6 +7,8 @@
 #include "../metadata/metadata_reader.h"
 #include <algorithm>
 #include <cctype>
+#include <unistd.h>        // usleep
+#include <sys/resource.h>  // setpriority / PRIO_PROCESS
 #include <android/log.h>
 #define TAG "AudioEngine"
 
@@ -261,10 +263,9 @@ void AudioEngine::StopDecoderThread() {
 }
 
 void AudioEngine::DecoderThreadFunc() {
-    // スレッド優先度を下げて OS 電力管理を促す
-    struct sched_param sp{};
-    sp.sched_priority = 0;
-    pthread_setschedparam(pthread_self(), SCHED_BATCH, &sp);
+    // nice 値を上げて（優先度を下げて）OS の電力管理を促す
+    // SCHED_BATCH は Android NDK では未保証のため setpriority を使用
+    setpriority(PRIO_PROCESS, 0, 10);
 
     constexpr size_t kChunkFrames = 4096;
     std::vector<uint8_t> chunk_buf(kChunkFrames * 8);  // 最大 8 bytes/frame
