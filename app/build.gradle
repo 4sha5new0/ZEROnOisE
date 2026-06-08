@@ -53,6 +53,7 @@ dependencies {
     implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
     implementation 'com.google.android.material:material:1.9.0'
     implementation 'androidx.core:core:1.10.1'
+    implementation 'androidx.media:media:1.6.0'  // MediaStyle 通知に必要
 }
 
 // kotlin-stdlib-jdk7/jdk8 (1.6.x) と kotlin-stdlib (1.8.x) の重複クラスを解消。

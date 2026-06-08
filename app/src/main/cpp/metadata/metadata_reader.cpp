@@ -3,6 +3,7 @@
 #include "../decoder/wav_decoder.h"
 #include "../decoder/mp3_decoder.h"
 #include "../decoder/mediacodec_decoder.h"
+#include <memory>     // std::make_unique
 #include <cctype>
 #include <algorithm>
 

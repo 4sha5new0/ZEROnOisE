@@ -1,5 +1,6 @@
 #include "flac_decoder.h"
 #include <cstring>
+#include <cctype>     // toupper (MetadataCallback 内のラムダで使用)
 #include <algorithm>
 #include <android/log.h>
 #define TAG "FlacDecoder"
