@@ -10,17 +10,32 @@
 #define TAG "ZEROnOisE_JNI"
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ヘルパー: AudioInfo → Java の AudioInfoData オブジェクトに変換
+// JNI ローカル参照管理の原則
+//   ・FindClass / NewObject / NewStringUTF などで生成した jobject / jclass /
+//     jstring はすべて DeleteLocalRef で解放する。
+//   ・解放しないと参照テーブル（上限 512）が溢れて SIGSEGV でクラッシュする。
+//   ・関数から return する jobject だけは呼び出し側に所有権を渡すため解放しない。
 // ─────────────────────────────────────────────────────────────────────────────
+
 static jobject AudioInfoToJava(JNIEnv* env, const AudioInfo& info) {
     jclass cls = env->FindClass("com/example/audioplayer/AudioInfoData");
     if (!cls) return nullptr;
-    jmethodID ctor = env->GetMethodID(cls, "<init>", "()V");
-    jobject obj = env->NewObject(cls, ctor);
 
+    jmethodID ctor = env->GetMethodID(cls, "<init>", "()V");
+    if (!ctor) { env->DeleteLocalRef(cls); return nullptr; }
+
+    jobject obj = env->NewObject(cls, ctor);
+    if (!obj) { env->DeleteLocalRef(cls); return nullptr; }
+
+    // jstring を作成 → SetObjectField → 即 DeleteLocalRef
     auto setStr = [&](const char* field, const std::string& val) {
         jfieldID f = env->GetFieldID(cls, field, "Ljava/lang/String;");
-        if (f) env->SetObjectField(obj, f, env->NewStringUTF(val.c_str()));
+        if (!f) return;
+        jstring js = env->NewStringUTF(val.c_str());
+        if (js) {
+            env->SetObjectField(obj, f, js);
+            env->DeleteLocalRef(js);   // ← 必須
+        }
     };
     auto setInt = [&](const char* field, int val) {
         jfieldID f = env->GetFieldID(cls, field, "I");
@@ -56,21 +71,28 @@ static jobject AudioInfoToJava(JNIEnv* env, const AudioInfo& info) {
     setBool("isMqa",         info.is_mqa);
     setBool("isMqaStudio",   info.is_mqa_studio);
 
+    env->DeleteLocalRef(cls);   // ← cls 解放（obj は呼び出し側へ所有権移譲）
     return obj;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ヘルパー: FileEntry → Java の FileEntryData オブジェクトに変換
-// ─────────────────────────────────────────────────────────────────────────────
 static jobject FileEntryToJava(JNIEnv* env, const FileEntry& fe) {
     jclass cls = env->FindClass("com/example/audioplayer/FileEntryData");
     if (!cls) return nullptr;
+
     jmethodID ctor = env->GetMethodID(cls, "<init>", "()V");
+    if (!ctor) { env->DeleteLocalRef(cls); return nullptr; }
+
     jobject obj = env->NewObject(cls, ctor);
+    if (!obj) { env->DeleteLocalRef(cls); return nullptr; }
 
     auto setStr = [&](const char* field, const std::string& val) {
         jfieldID f = env->GetFieldID(cls, field, "Ljava/lang/String;");
-        if (f) env->SetObjectField(obj, f, env->NewStringUTF(val.c_str()));
+        if (!f) return;
+        jstring js = env->NewStringUTF(val.c_str());
+        if (js) {
+            env->SetObjectField(obj, f, js);
+            env->DeleteLocalRef(js);   // ← 必須
+        }
     };
     auto setBool = [&](const char* field, bool val) {
         jfieldID f = env->GetFieldID(cls, field, "Z");
@@ -87,38 +109,33 @@ static jobject FileEntryToJava(JNIEnv* env, const FileEntry& fe) {
     setLong("sizeBytes",   fe.size_bytes);
     setLong("modifiedMs",  fe.modified_ms);
 
-    // ファイルの場合のみメタデータを付与
     if (!fe.is_directory && fe.meta_loaded) {
-        jclass acls = env->FindClass("com/example/audioplayer/AudioInfoData");
-        if (acls) {
-            jobject ai = AudioInfoToJava(env, fe.info);
+        jobject ai = AudioInfoToJava(env, fe.info);
+        if (ai) {
             jfieldID f = env->GetFieldID(cls, "audioInfo",
                 "Lcom/example/audioplayer/AudioInfoData;");
-            if (f && ai) env->SetObjectField(obj, f, ai);
+            if (f) env->SetObjectField(obj, f, ai);
+            env->DeleteLocalRef(ai);   // ← 必須
         }
     }
+
+    env->DeleteLocalRef(cls);
     return obj;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// JNI 実装
-// ─────────────────────────────────────────────────────────────────────────────
 extern "C" {
 
-// nativeCreate: AudioEngine を生成して long ハンドルを返す
 JNIEXPORT jlong JNICALL
 Java_com_example_audioplayer_NativeBridge_nativeCreate(JNIEnv*, jobject) {
-    auto* engine = new AudioEngine();
-    return reinterpret_cast<jlong>(engine);
+    return reinterpret_cast<jlong>(new AudioEngine());
 }
 
-// nativeDestroy: AudioEngine を破棄
 JNIEXPORT void JNICALL
 Java_com_example_audioplayer_NativeBridge_nativeDestroy(JNIEnv*, jobject, jlong handle) {
     delete reinterpret_cast<AudioEngine*>(handle);
 }
 
-// nativeLoadFile: ファイルを開く（再生は nativePlay で開始）
 JNIEXPORT jboolean JNICALL
 Java_com_example_audioplayer_NativeBridge_nativeLoadFile(
         JNIEnv* env, jobject, jlong handle, jstring jpath) {
@@ -130,78 +147,58 @@ Java_com_example_audioplayer_NativeBridge_nativeLoadFile(
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_audioplayer_NativeBridge_nativePlay(JNIEnv*, jobject, jlong handle) {
-    reinterpret_cast<AudioEngine*>(handle)->Play();
+Java_com_example_audioplayer_NativeBridge_nativePlay(JNIEnv*, jobject, jlong h) {
+    reinterpret_cast<AudioEngine*>(h)->Play();
 }
-
 JNIEXPORT void JNICALL
-Java_com_example_audioplayer_NativeBridge_nativePause(JNIEnv*, jobject, jlong handle) {
-    reinterpret_cast<AudioEngine*>(handle)->Pause();
+Java_com_example_audioplayer_NativeBridge_nativePause(JNIEnv*, jobject, jlong h) {
+    reinterpret_cast<AudioEngine*>(h)->Pause();
 }
-
 JNIEXPORT void JNICALL
-Java_com_example_audioplayer_NativeBridge_nativeStop(JNIEnv*, jobject, jlong handle) {
-    reinterpret_cast<AudioEngine*>(handle)->Stop();
+Java_com_example_audioplayer_NativeBridge_nativeStop(JNIEnv*, jobject, jlong h) {
+    reinterpret_cast<AudioEngine*>(h)->Stop();
 }
-
 JNIEXPORT void JNICALL
 Java_com_example_audioplayer_NativeBridge_nativeSeek(
-        JNIEnv*, jobject, jlong handle, jlong target_sample) {
-    reinterpret_cast<AudioEngine*>(handle)
-        ->Seek(static_cast<uint64_t>(target_sample));
+        JNIEnv*, jobject, jlong h, jlong sample) {
+    reinterpret_cast<AudioEngine*>(h)->Seek(static_cast<uint64_t>(sample));
 }
-
 JNIEXPORT void JNICALL
-Java_com_example_audioplayer_NativeBridge_nativeNextTrack(JNIEnv*, jobject, jlong handle) {
-    reinterpret_cast<AudioEngine*>(handle)->NextTrack();
+Java_com_example_audioplayer_NativeBridge_nativeNextTrack(JNIEnv*, jobject, jlong h) {
+    reinterpret_cast<AudioEngine*>(h)->NextTrack();
 }
-
 JNIEXPORT void JNICALL
-Java_com_example_audioplayer_NativeBridge_nativePrevTrack(JNIEnv*, jobject, jlong handle) {
-    reinterpret_cast<AudioEngine*>(handle)->PrevTrack();
+Java_com_example_audioplayer_NativeBridge_nativePrevTrack(JNIEnv*, jobject, jlong h) {
+    reinterpret_cast<AudioEngine*>(h)->PrevTrack();
 }
 
-// nativeGetPosition: 現在位置（サンプル単位）
 JNIEXPORT jlong JNICALL
-Java_com_example_audioplayer_NativeBridge_nativeGetPosition(JNIEnv*, jobject, jlong handle) {
-    return static_cast<jlong>(
-        reinterpret_cast<AudioEngine*>(handle)->GetPosition());
+Java_com_example_audioplayer_NativeBridge_nativeGetPosition(JNIEnv*, jobject, jlong h) {
+    return static_cast<jlong>(reinterpret_cast<AudioEngine*>(h)->GetPosition());
 }
-
-// nativeIsPlaying
 JNIEXPORT jboolean JNICALL
-Java_com_example_audioplayer_NativeBridge_nativeIsPlaying(JNIEnv*, jobject, jlong handle) {
-    return reinterpret_cast<AudioEngine*>(handle)->IsPlaying();
+Java_com_example_audioplayer_NativeBridge_nativeIsPlaying(JNIEnv*, jobject, jlong h) {
+    return reinterpret_cast<AudioEngine*>(h)->IsPlaying();
 }
-
-// nativeGetStreamMode: 0=EXCLUSIVE, 1=SHARED, 2=NONE
 JNIEXPORT jint JNICALL
-Java_com_example_audioplayer_NativeBridge_nativeGetStreamMode(JNIEnv*, jobject, jlong handle) {
-    return static_cast<jint>(
-        reinterpret_cast<AudioEngine*>(handle)->GetStreamMode());
+Java_com_example_audioplayer_NativeBridge_nativeGetStreamMode(JNIEnv*, jobject, jlong h) {
+    return static_cast<jint>(reinterpret_cast<AudioEngine*>(h)->GetStreamMode());
 }
-
-// nativeGetUnderrunCount
 JNIEXPORT jint JNICALL
-Java_com_example_audioplayer_NativeBridge_nativeGetUnderrunCount(JNIEnv*, jobject, jlong handle) {
-    return static_cast<jint>(
-        reinterpret_cast<AudioEngine*>(handle)->GetUnderrunCount());
+Java_com_example_audioplayer_NativeBridge_nativeGetUnderrunCount(JNIEnv*, jobject, jlong h) {
+    return static_cast<jint>(reinterpret_cast<AudioEngine*>(h)->GetUnderrunCount());
 }
 
-// nativeGetCurrentInfo: 現在のファイル情報を AudioInfoData オブジェクトで返す
 JNIEXPORT jobject JNICALL
 Java_com_example_audioplayer_NativeBridge_nativeGetCurrentInfo(
-        JNIEnv* env, jobject, jlong handle) {
-    auto* engine = reinterpret_cast<AudioEngine*>(handle);
-    return AudioInfoToJava(env, engine->GetCurrentInfo());
+        JNIEnv* env, jobject, jlong h) {
+    return AudioInfoToJava(env, reinterpret_cast<AudioEngine*>(h)->GetCurrentInfo());
 }
 
-// nativeGetLevelMeter: float[8] = {rmsL, rmsR, peakL, peakR, holdL, holdR, clipL, clipR}
 JNIEXPORT jfloatArray JNICALL
 Java_com_example_audioplayer_NativeBridge_nativeGetLevelMeter(
-        JNIEnv* env, jobject, jlong handle) {
-    const auto snap =
-        reinterpret_cast<AudioEngine*>(handle)->GetLevel();
+        JNIEnv* env, jobject, jlong h) {
+    const auto snap = reinterpret_cast<AudioEngine*>(h)->GetLevel();
     jfloatArray arr = env->NewFloatArray(8);
     float data[8] = {
         snap.rms_l_dbfs,  snap.rms_r_dbfs,
@@ -214,7 +211,6 @@ Java_com_example_audioplayer_NativeBridge_nativeGetLevelMeter(
     return arr;
 }
 
-// nativeScanDirectory: ディレクトリをスキャンして FileEntryData[] を返す
 JNIEXPORT jobjectArray JNICALL
 Java_com_example_audioplayer_NativeBridge_nativeScanDirectory(
         JNIEnv* env, jobject, jstring jdir) {
@@ -222,7 +218,7 @@ Java_com_example_audioplayer_NativeBridge_nativeScanDirectory(
     auto entries = FileScanner::ScanDirectory(std::string(dir));
     env->ReleaseStringUTFChars(jdir, dir);
 
-    // メタデータ先読み（ファイルのみ、同期）
+    // メタデータ先読み（ファイルのみ）
     for (auto& fe : entries) {
         if (!fe.is_directory) {
             fe.info = MetadataReader::Read(fe.full_path);
@@ -231,31 +227,45 @@ Java_com_example_audioplayer_NativeBridge_nativeScanDirectory(
     }
 
     jclass cls = env->FindClass("com/example/audioplayer/FileEntryData");
+    if (!cls) {
+        // フォールバック: 空配列を返す
+        jclass obj_cls = env->FindClass("java/lang/Object");
+        jobjectArray empty = env->NewObjectArray(0, obj_cls, nullptr);
+        env->DeleteLocalRef(obj_cls);
+        return empty;
+    }
+
     jobjectArray arr = env->NewObjectArray(
         static_cast<jsize>(entries.size()), cls, nullptr);
+    env->DeleteLocalRef(cls);   // arr が cls を保持するので解放可能
+
     for (size_t i = 0; i < entries.size(); ++i) {
         jobject obj = FileEntryToJava(env, entries[i]);
-        env->SetObjectArrayElement(arr, static_cast<jsize>(i), obj);
-        env->DeleteLocalRef(obj);
+        if (obj) {
+            env->SetObjectArrayElement(arr, static_cast<jsize>(i), obj);
+            env->DeleteLocalRef(obj);   // ← 必須
+        }
     }
     return arr;
 }
 
-// nativeGetStorageRoots: ストレージルートの一覧を String[] で返す
 JNIEXPORT jobjectArray JNICALL
 Java_com_example_audioplayer_NativeBridge_nativeGetStorageRoots(JNIEnv* env, jobject) {
     const auto roots = FileScanner::GetStorageRoots();
+
     jclass str_cls = env->FindClass("java/lang/String");
     jobjectArray arr = env->NewObjectArray(
         static_cast<jsize>(roots.size()), str_cls, nullptr);
+    env->DeleteLocalRef(str_cls);
+
     for (size_t i = 0; i < roots.size(); ++i) {
-        env->SetObjectArrayElement(arr, static_cast<jsize>(i),
-            env->NewStringUTF(roots[i].c_str()));
+        jstring js = env->NewStringUTF(roots[i].c_str());
+        env->SetObjectArrayElement(arr, static_cast<jsize>(i), js);
+        env->DeleteLocalRef(js);   // ← 必須
     }
     return arr;
 }
 
-// nativeReadMetadata: 単一ファイルのメタデータ読み取り
 JNIEXPORT jobject JNICALL
 Java_com_example_audioplayer_NativeBridge_nativeReadMetadata(
         JNIEnv* env, jobject, jstring jpath) {
