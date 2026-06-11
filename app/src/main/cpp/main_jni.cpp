@@ -192,7 +192,7 @@ Java_com_example_audioplayer_NativeBridge_nativeGetUnderrunCount(JNIEnv*, jobjec
 JNIEXPORT jobject JNICALL
 Java_com_example_audioplayer_NativeBridge_nativeGetCurrentInfo(
         JNIEnv* env, jobject, jlong h) {
-    return AudioInfoToJava(env, reinterpret_cast<AudioEngine*>(h)->GetCurrentInfo());
+    return AudioInfoToJava(env, reinterpret_cast<AudioEngine*>(h)->GetCurrentInfoCopy());
 }
 
 JNIEXPORT jfloatArray JNICALL

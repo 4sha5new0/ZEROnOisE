@@ -124,10 +124,11 @@ bool AudioEngine::LoadFile(const std::string& path) {
     const AudioInfo& new_info = dec->GetInfo();
 
     // ストリームの SR / フォーマットが変わる場合は再作成
+    // atomic 値で比較（JNI スレッドから呼ばれるため mutex より atomic が適切）
     const bool need_recreate = !stream_ ||
-        (new_info.sample_rate   != current_info_.sample_rate) ||
-        (new_info.aaudio_format != current_info_.aaudio_format) ||
-        (new_info.channels      != current_info_.channels);
+        (new_info.sample_rate   != cb_sample_rate_.load()) ||
+        (new_info.aaudio_format != cb_aaudio_format_.load()) ||
+        (new_info.channels      != 2u);  // 常にステレオ固定
 
     if (need_recreate) {
         CloseStream();
@@ -139,7 +140,7 @@ bool AudioEngine::LoadFile(const std::string& path) {
     ring_buf_->Flush();
     level_meter_.Reset();
     decoder_       = std::move(dec);
-    current_info_  = new_info;
+    UpdateCurrentInfo(new_info);   // mutex + atomic を一括更新
     position_.store(0);
     underrun_count_.store(0);
     return true;
@@ -191,26 +192,27 @@ void AudioEngine::Seek(uint64_t target_sample) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 void AudioEngine::NextTrack() {
-    if (current_info_.path.empty()) return;
-    const std::string next = FileScanner::GetNextFile(current_info_.path);
-    if (next.empty()) {
-        Stop();
-        if (on_playback_end_) on_playback_end_();
-        return;
-    }
+    std::string path, next;
+    { std::lock_guard<std::mutex> lock(info_mutex_); path = current_info_.path; }
+    if (path.empty()) return;
+    next = FileScanner::GetNextFile(path);
+    if (next.empty()) { Stop(); if (on_playback_end_) on_playback_end_(); return; }
     const bool was_playing = playing_.load();
     if (LoadFile(next) && was_playing) Play();
     if (on_track_changed_) on_track_changed_(next);
 }
 
 void AudioEngine::PrevTrack() {
-    if (current_info_.path.empty()) return;
-    // 3秒以上再生済みなら先頭に戻る
-    if (position_.load() > static_cast<uint64_t>(current_info_.sample_rate) * 3) {
-        Seek(0);
-        return;
+    std::string path;
+    uint32_t sr;
+    {
+        std::lock_guard<std::mutex> lock(info_mutex_);
+        path = current_info_.path;
+        sr   = current_info_.sample_rate;
     }
-    const std::string prev = FileScanner::GetPrevFile(current_info_.path);
+    if (path.empty()) return;
+    if (position_.load() > static_cast<uint64_t>(sr) * 3) { Seek(0); return; }
+    const std::string prev = FileScanner::GetPrevFile(path);
     const bool was_playing = playing_.load();
     if (!prev.empty() && LoadFile(prev) && was_playing) Play();
     if (on_track_changed_ && !prev.empty()) on_track_changed_(prev);
@@ -224,10 +226,11 @@ bool AudioEngine::SwitchTrack(const std::string& path) {
     if (!dec || !dec->Open(path)) return false;
 
     const AudioInfo& new_info = dec->GetInfo();
+    // atomic 値で現在の SR/format と比較（Decoder Thread から呼ばれる）
     const bool need_recreate =
-        (new_info.sample_rate   != current_info_.sample_rate) ||
-        (new_info.aaudio_format != current_info_.aaudio_format) ||
-        (new_info.channels      != current_info_.channels);
+        (new_info.sample_rate   != cb_sample_rate_.load())    ||
+        (new_info.aaudio_format != cb_aaudio_format_.load())  ||
+        (new_info.channels      != 2u);
 
     if (need_recreate) {
         // ストリームを止めて再作成
@@ -241,7 +244,7 @@ bool AudioEngine::SwitchTrack(const std::string& path) {
 
     ring_buf_->Flush();
     decoder_      = std::move(dec);
-    current_info_ = new_info;
+    UpdateCurrentInfo(new_info);   // mutex + atomic を一括更新
     position_.store(0);
 
     if (on_track_changed_) on_track_changed_(path);
@@ -273,19 +276,22 @@ void AudioEngine::DecoderThreadFunc() {
     while (decoder_running_.load()) {
         if (!decoder_) { usleep(10000); continue; }
 
+        // bytes_per_frame は atomic で読む（UpdateCurrentInfo と同期済み）
         const size_t chunk_bytes = kChunkFrames
-            * static_cast<size_t>(current_info_.bytes_per_frame);
+            * static_cast<size_t>(cb_bytes_per_frame_.load(std::memory_order_acquire));
 
         // リングバッファに書き込める余裕があるまで待つ
         if (ring_buf_->WritableBytes() < chunk_bytes) {
-            usleep(2000);  // 2ms 待機してバッファが消化されるのを待つ
+            usleep(2000);
             continue;
         }
 
         const int64_t n = decoder_->Decode(chunk_buf.data(), kChunkFrames);
         if (n == 0) {
-            // EOF: 自動次曲
-            const std::string next = FileScanner::GetNextFile(current_info_.path);
+            // EOF: 自動次曲（current_info_.path を mutex で読む）
+            std::string cur_path;
+            { std::lock_guard<std::mutex> lock(info_mutex_); cur_path = current_info_.path; }
+            const std::string next = FileScanner::GetNextFile(cur_path);
             if (next.empty()) {
                 playing_.store(false);
                 if (on_playback_end_) on_playback_end_();
@@ -302,15 +308,12 @@ void AudioEngine::DecoderThreadFunc() {
             break;
         }
 
-        // position_ を更新（サンプル単位）
         position_.fetch_add(static_cast<uint64_t>(n));
 
         const size_t written = ring_buf_->Write(chunk_buf.data(),
-            static_cast<size_t>(n) * current_info_.bytes_per_frame);
-        if (written == 0) {
-            // 書き込み失敗（バッファフル）: 少し待ってリトライ
-            usleep(1000);
-        }
+            static_cast<size_t>(n)
+            * static_cast<size_t>(cb_bytes_per_frame_.load(std::memory_order_acquire)));
+        if (written == 0) usleep(1000);
     }
     decoder_running_.store(false);
 }
@@ -324,27 +327,27 @@ aaudio_data_callback_result_t AudioEngine::DataCallback(
         void* audio_data, int32_t num_frames) {
 
     auto* self = static_cast<AudioEngine*>(user_data);
+
+    // RT スレッドでは mutex 禁止 → atomic で読む
+    const int32_t  bytes_per_frame = self->cb_bytes_per_frame_.load(std::memory_order_acquire);
+    const int32_t  fmt             = self->cb_aaudio_format_.load(std::memory_order_acquire);
+    const uint32_t sample_rate     = self->cb_sample_rate_.load(std::memory_order_acquire);
+
     if (!self->playing_.load()) {
-        // 停止中: 無音で埋めて継続
-        std::memset(audio_data, 0,
-            num_frames * self->current_info_.bytes_per_frame);
+        std::memset(audio_data, 0, static_cast<size_t>(num_frames) * bytes_per_frame);
         return AAUDIO_CALLBACK_RESULT_CONTINUE;
     }
 
-    const size_t byte_count =
-        static_cast<size_t>(num_frames) * self->current_info_.bytes_per_frame;
+    const size_t byte_count = static_cast<size_t>(num_frames) * bytes_per_frame;
     const size_t read = self->ring_buf_->Read(audio_data, byte_count);
 
     if (read < byte_count) {
-        // アンダーラン: 不足分を無音で補う
         self->underrun_count_.fetch_add(1, std::memory_order_relaxed);
     }
 
-    // レベルメーター計算（atomic 書き込みのみ: RT-safe）
-    self->level_meter_.Compute(
-        audio_data, num_frames,
-        self->current_info_.aaudio_format,
-        self->current_info_.sample_rate);
+    // レベルメーター計算（atomic 読み値を使用: mutex 不要）
+    self->level_meter_.Compute(audio_data, num_frames,
+        static_cast<aaudio_format_t>(fmt), sample_rate);
 
     return AAUDIO_CALLBACK_RESULT_CONTINUE;
 }
@@ -355,14 +358,14 @@ void AudioEngine::ErrorCallbackStatic(
     auto* self = static_cast<AudioEngine*>(user_data);
     __android_log_print(ANDROID_LOG_ERROR, TAG, "AAudio error: %s",
         AAudio_convertResultToText(error));
-    // ストリームが切断された場合は再開を試みる
     if (error == AAUDIO_ERROR_DISCONNECTED && self->playing_.load()) {
         self->StopDecoderThread();
         self->CloseStream();
+        // atomic 値でストリームを再作成（current_info_ へのアクセス不要）
         self->OpenStream(
-            self->current_info_.sample_rate,
-            self->current_info_.aaudio_format,
-            self->current_info_.channels);
+            self->cb_sample_rate_.load(),
+            static_cast<aaudio_format_t>(self->cb_aaudio_format_.load()),
+            2);
         if (self->stream_) AAudioStream_requestStart(self->stream_);
         self->StartDecoderThread();
     }
