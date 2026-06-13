@@ -61,28 +61,28 @@ FLAC__StreamDecoderWriteStatus FlacDecoder::WriteCallback(
     const uint8_t  bps      = static_cast<uint8_t>(frame->header.bits_per_sample);
 
     if (bps <= 16) {
-        // PCM_I16: int32_t → int16_t
-        const size_t bytes = n * channels * 2;
+        // PCM_I16 出力
+        const size_t bytes    = n * channels * sizeof(int16_t);
         const size_t old_size = self->staging_.size();
         self->staging_.resize(old_size + bytes);
         int16_t* dst = reinterpret_cast<int16_t*>(self->staging_.data() + old_size);
-        for (uint32_t i = 0; i < n; ++i) {
-            for (uint8_t c = 0; c < channels; ++c) {
+        for (uint32_t i = 0; i < n; ++i)
+            for (uint8_t c = 0; c < channels; ++c)
                 *dst++ = static_cast<int16_t>(buffer[c][i]);
-            }
-        }
     } else {
-        // PCM_I32 (24bit → 上位 24bit 詰め、32bit はそのまま)
-        const size_t bytes = n * channels * 4;
+        // PCM_FLOAT 出力（API 29 で PCM_I32 が使えないため）
+        // 24bit: normalize = 1/2^23, 32bit: normalize = 1/2^31
+        const float scale = (bps == 24)
+            ? (1.0f / 8388608.0f)    // 2^23
+            : (1.0f / 2147483648.0f);// 2^31
+
+        const size_t bytes    = n * channels * sizeof(float);
         const size_t old_size = self->staging_.size();
         self->staging_.resize(old_size + bytes);
-        int32_t* dst = reinterpret_cast<int32_t*>(self->staging_.data() + old_size);
-        const int shift = (bps == 24) ? 8 : 0;
-        for (uint32_t i = 0; i < n; ++i) {
-            for (uint8_t c = 0; c < channels; ++c) {
-                *dst++ = buffer[c][i] << shift;
-            }
-        }
+        float* dst = reinterpret_cast<float*>(self->staging_.data() + old_size);
+        for (uint32_t i = 0; i < n; ++i)
+            for (uint8_t c = 0; c < channels; ++c)
+                *dst++ = static_cast<float>(buffer[c][i]) * scale;
     }
 
     self->position_ += n;

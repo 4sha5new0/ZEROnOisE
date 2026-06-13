@@ -308,7 +308,7 @@ void AudioEngine::DecoderThreadFunc() {
             break;
         }
 
-        position_.fetch_add(static_cast<uint64_t>(n));
+        // position_ は DataCallback で更新するのでここでは更新しない
 
         const size_t written = ring_buf_->Write(chunk_buf.data(),
             static_cast<size_t>(n)
@@ -343,6 +343,14 @@ aaudio_data_callback_result_t AudioEngine::DataCallback(
 
     if (read < byte_count) {
         self->underrun_count_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    // position_ は DataCallback（実際の出力タイミング）で更新する。
+    // DecoderThread で更新すると ring buffer 先読み分（最大 ~35秒）ずれる。
+    if (read > 0) {
+        const uint64_t frames_out = static_cast<uint64_t>(read)
+                                    / static_cast<uint64_t>(bytes_per_frame);
+        self->position_.fetch_add(frames_out, std::memory_order_relaxed);
     }
 
     // レベルメーター計算（atomic 読み値を使用: mutex 不要）

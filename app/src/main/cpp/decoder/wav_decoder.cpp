@@ -84,11 +84,12 @@ bool WavDecoder::ParseHeader() {
             if (audio_format == 3) {
                 // IEEE float
                 info_.bit_depth = 32;
+                is_float_ = true;
             } else if (audio_format == 0xFFFE) {
                 // EXTENSIBLE: SubFormat は offset 24
                 if (to_read >= 26) {
                     const uint16_t sub_fmt = read_u16le(fmt + 24);
-                    if (sub_fmt == 3) info_.bit_depth = 32; // float
+                    if (sub_fmt == 3) { info_.bit_depth = 32; is_float_ = true; }
                 }
             } else if (audio_format != 1) {
                 last_error_ = "unsupported WAV format";
@@ -129,29 +130,54 @@ bool WavDecoder::ParseHeader() {
 int64_t WavDecoder::Decode(void* output_buffer, size_t max_frames) {
     if (!fp_ || position_ >= info_.total_samples) return 0;
 
-    const size_t frames_left = info_.total_samples - position_;
+    const size_t frames_left    = info_.total_samples - position_;
     const size_t frames_to_read = std::min(max_frames, frames_left);
 
-    const uint32_t file_bytes_per_sample = (info_.bit_depth + 7) / 8;
-    const uint32_t file_frame_size       = file_bytes_per_sample * info_.channels;
+    const uint32_t file_bps        = (info_.bit_depth + 7) / 8; // bytes per sample in file
+    const uint32_t file_frame_size = file_bps * info_.channels;
 
-    if (info_.bit_depth == 24) {
-        // 24bit: ファイルから 3バイト×ch 読み込み → int32_t 上位 24bit に詰める
-        std::vector<uint8_t> raw(frames_to_read * file_frame_size);
-        const size_t n = fread(raw.data(), file_frame_size, frames_to_read, fp_);
-        int32_t* out = static_cast<int32_t*>(output_buffer);
+    if (info_.bit_depth == 16) {
+        // PCM_I16: ファイルから直接読み込む（変換なし）
+        const size_t n = fread(output_buffer, file_frame_size, frames_to_read, fp_);
+        position_ += n;
+        return static_cast<int64_t>(n);
+
+    } else if (info_.bit_depth == 24) {
+        // 24bit → PCM_FLOAT: float32 の仮数部は 24bit 相当なので誤差ゼロ
+        const float scale = 1.0f / 8388608.0f; // 1 / 2^23
+        const size_t total_samples = frames_to_read * info_.channels;
+
+        // 静的変換バッファ（毎回 vector 確保を避ける）
+        raw_buf_.resize(frames_to_read * file_frame_size);
+        const size_t n = fread(raw_buf_.data(), file_frame_size, frames_to_read, fp_);
+
+        float* out = static_cast<float*>(output_buffer);
         for (size_t i = 0; i < n * info_.channels; ++i) {
-            const uint8_t* s = raw.data() + i * 3;
-            // リトルエンディアン 3バイト → int32_t（符号拡張して左シフト8）
+            const uint8_t* s = raw_buf_.data() + i * 3;
             int32_t v = s[0] | (s[1] << 8) | (s[2] << 16);
-            if (v & 0x800000) v |= 0xFF000000;  // 符号拡張
-            out[i] = v << 8;                    // 上位 24bit に配置
+            if (v & 0x800000) v |= 0xFF000000; // 符号拡張
+            *out++ = static_cast<float>(v) * scale;
         }
         position_ += n;
         return static_cast<int64_t>(n);
-    } else {
-        // 16bit / 32bit: そのままコピー
+
+    } else if (info_.bit_depth == 32 && info_.is_float) {
+        // 32bit float: そのままコピー（PCM_FLOAT）
         const size_t n = fread(output_buffer, file_frame_size, frames_to_read, fp_);
+        position_ += n;
+        return static_cast<int64_t>(n);
+
+    } else {
+        // 32bit int → PCM_FLOAT
+        const float scale = 1.0f / 2147483648.0f; // 1 / 2^31
+        raw_buf_.resize(frames_to_read * file_frame_size);
+        const size_t n = fread(raw_buf_.data(), file_frame_size, frames_to_read, fp_);
+
+        float* out = static_cast<float*>(output_buffer);
+        const int32_t* src = reinterpret_cast<const int32_t*>(raw_buf_.data());
+        for (size_t i = 0; i < n * info_.channels; ++i)
+            *out++ = static_cast<float>(src[i]) * scale;
+
         position_ += n;
         return static_cast<int64_t>(n);
     }

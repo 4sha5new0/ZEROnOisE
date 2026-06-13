@@ -1,6 +1,7 @@
 #pragma once
 #include "decoder_base.h"
 #include <cstdio>
+#include <vector>
 
 class WavDecoder : public DecoderBase {
 public:
@@ -15,10 +16,12 @@ public:
 private:
     bool ParseHeader();
 
-    FILE*       fp_         = nullptr;
-    AudioInfo   info_;
-    int64_t     data_offset_ = 0;   // PCM データ先頭のファイルオフセット（bytes）
-    uint64_t    data_size_   = 0;   // PCM データのバイト数
-    uint64_t    position_    = 0;   // 現在位置（サンプル単位）
-    std::string last_error_;
+    FILE*                fp_          = nullptr;
+    AudioInfo            info_;
+    int64_t              data_offset_ = 0;
+    uint64_t             data_size_   = 0;
+    uint64_t             position_    = 0;
+    bool                 is_float_    = false; // 32bit IEEE float WAV
+    std::vector<uint8_t> raw_buf_;             // 24/32bit 変換用バッファ（毎回確保を避ける）
+    std::string          last_error_;
 };

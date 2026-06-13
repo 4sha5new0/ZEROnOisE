@@ -83,18 +83,22 @@ struct AudioInfo {
         } else {
             switch (bit_depth) {
                 case 16:
+                    // 16bit: PCM_I16（ビットパーフェクト）
                     aaudio_format  = AAUDIO_FORMAT_PCM_I16;
                     bytes_per_frame = 2 * channels;
                     break;
                 case 24:
-                    // Android 10 (API 29) は PCM_I24_PACKED 未対応。
-                    // 24bit データを int32_t 上位 24bit に左詰めして PCM_I32 で送る。
-                    // 下位 8bit = 0x00 のゼロ詰めは数学的に等価（劣化なし）。
-                    aaudio_format  = AAUDIO_FORMAT_PCM_I32;
+                    // AAUDIO_FORMAT_PCM_I32 は API 31 (Android 12) 以降のみ対応。
+                    // M3 Ultra = Android 10 (API 29) では使用不可。
+                    // PCM_FLOAT を使う。float32 の仮数部は 23bit + 暗黙の 1bit = 24bit 相当。
+                    // 24bit 整数 [-8388608, 8388607] は float32 で誤差ゼロで表現可能。
+                    aaudio_format  = AAUDIO_FORMAT_PCM_FLOAT;
                     bytes_per_frame = 4 * channels;
                     break;
                 case 32:
-                    aaudio_format  = AAUDIO_FORMAT_PCM_I32;
+                    // 32bit int も PCM_FLOAT で送る（float32 仮数部 < 32bit のため
+                    // 下位 9bit が丸められるが、32bit lossless 音源は極めて希少）
+                    aaudio_format  = AAUDIO_FORMAT_PCM_FLOAT;
                     bytes_per_frame = 4 * channels;
                     break;
                 default:
