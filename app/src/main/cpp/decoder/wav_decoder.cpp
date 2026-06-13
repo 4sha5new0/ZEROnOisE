@@ -161,7 +161,7 @@ int64_t WavDecoder::Decode(void* output_buffer, size_t max_frames) {
         position_ += n;
         return static_cast<int64_t>(n);
 
-    } else if (info_.bit_depth == 32 && info_.is_float) {
+    } else if (info_.bit_depth == 32 && is_float_) {
         // 32bit float: そのままコピー（PCM_FLOAT）
         const size_t n = fread(output_buffer, file_frame_size, frames_to_read, fp_);
         position_ += n;
