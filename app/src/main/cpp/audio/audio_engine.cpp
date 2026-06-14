@@ -14,7 +14,8 @@
 
 // ─────────────────────────────────────────────────────────────────────────────
 AudioEngine::AudioEngine()
-    : ring_buf_(std::make_unique<LockFreeRingBuffer>(kRingCapacity))
+    // 初期値は小さめ（LoadFile/SwitchTrack で実際のフォーマットに合わせて再確保）
+    : ring_buf_(std::make_unique<LockFreeRingBuffer>(44100 * 4 * 2))
 {}
 
 AudioEngine::~AudioEngine() {
@@ -107,9 +108,6 @@ void AudioEngine::CloseStream() {
 // ─────────────────────────────────────────────────────────────────────────────
 bool AudioEngine::LoadFile(const std::string& path) {
     StopDecoderThread();
-    if (stream_) {
-        AAudioStream_requestStop(stream_);
-    }
 
     auto dec = CreateDecoder(path);
     if (!dec) {
@@ -123,24 +121,27 @@ bool AudioEngine::LoadFile(const std::string& path) {
 
     const AudioInfo& new_info = dec->GetInfo();
 
-    // ストリームの SR / フォーマットが変わる場合は再作成
-    // atomic 値で比較（JNI スレッドから呼ばれるため mutex より atomic が適切）
-    const bool need_recreate = !stream_ ||
-        (new_info.sample_rate   != cb_sample_rate_.load()) ||
-        (new_info.aaudio_format != cb_aaudio_format_.load()) ||
-        (new_info.channels      != 2u);  // 常にステレオ固定
+    // ストリームを必ず閉じる（DataCallback を同期的に停止）。
+    // need_recreate フラグで「閉じない」最適化をすると、DataCallback が
+    // 動いたまま Flush() が呼ばれ ring_buf_ の read/write_pos_ が壊れてノイズが出る。
+    CloseStream();
 
-    if (need_recreate) {
-        CloseStream();
-        if (!OpenStream(new_info.sample_rate, new_info.aaudio_format, new_info.channels)) {
-            return false;
-        }
+    // リングバッファを実際のフォーマットで 2 秒分に再確保
+    const size_t buf_bytes =
+        static_cast<size_t>(new_info.sample_rate)
+        * static_cast<size_t>(new_info.bytes_per_frame)
+        * 2u;  // 2 秒分
+    ring_buf_ = std::make_unique<LockFreeRingBuffer>(buf_bytes);
+
+    if (!OpenStream(new_info.sample_rate, new_info.aaudio_format, new_info.channels)) {
+        return false;
     }
 
+    // DataCallback は停止済みなので Flush() は安全
     ring_buf_->Flush();
     level_meter_.Reset();
     decoder_       = std::move(dec);
-    UpdateCurrentInfo(new_info);   // mutex + atomic を一括更新
+    UpdateCurrentInfo(new_info);
     position_.store(0);
     underrun_count_.store(0);
     return true;
@@ -167,7 +168,8 @@ void AudioEngine::Pause() {
 
 void AudioEngine::Stop() {
     StopDecoderThread();
-    if (stream_) AAudioStream_requestStop(stream_);
+    // DataCallback を同期的に停止してから Flush
+    CloseStream();
     ring_buf_->Flush();
     level_meter_.Reset();
     playing_.store(false);
@@ -178,14 +180,30 @@ void AudioEngine::Stop() {
 // ─────────────────────────────────────────────────────────────────────────────
 void AudioEngine::Seek(uint64_t target_sample) {
     const bool was_playing = playing_.load();
+    playing_.store(false, std::memory_order_release);
+
+    // DataCallback を同期的に停止してから Flush する。
+    // requestStop() は非同期なので close() で完全停止を保証する。
     StopDecoderThread();
+    if (stream_) {
+        AAudioStream_requestStop(stream_);
+        AAudioStream_close(stream_);
+        stream_ = nullptr;
+        stream_mode_.store(StreamMode::NONE);
+    }
 
     ring_buf_->Flush();
     if (decoder_) decoder_->Seek(target_sample);
     position_.store(target_sample);
 
     if (was_playing) {
-        playing_.store(true);
+        // ストリームを再オープン（UpdateCurrentInfo 済みの atomic 値を使用）
+        OpenStream(
+            cb_sample_rate_.load(),
+            static_cast<aaudio_format_t>(cb_aaudio_format_.load()),
+            2);
+        playing_.store(true, std::memory_order_release);
+        if (stream_) AAudioStream_requestStart(stream_);
         StartDecoderThread();
     }
 }
@@ -226,26 +244,32 @@ bool AudioEngine::SwitchTrack(const std::string& path) {
     if (!dec || !dec->Open(path)) return false;
 
     const AudioInfo& new_info = dec->GetInfo();
-    // atomic 値で現在の SR/format と比較（Decoder Thread から呼ばれる）
-    const bool need_recreate =
-        (new_info.sample_rate   != cb_sample_rate_.load())    ||
-        (new_info.aaudio_format != cb_aaudio_format_.load())  ||
-        (new_info.channels      != 2u);
 
-    if (need_recreate) {
-        // ストリームを止めて再作成
-        if (stream_) AAudioStream_requestStop(stream_);
-        CloseStream();
-        if (!OpenStream(new_info.sample_rate, new_info.aaudio_format, new_info.channels)) {
-            return false;
-        }
-        AAudioStream_requestStart(stream_);
+    // DataCallback を同期的に停止してから Flush する（ノイズ防止）。
+    // need_recreate の有無に関わらず常に CloseStream() する。
+    if (stream_) {
+        AAudioStream_requestStop(stream_);
+        AAudioStream_close(stream_);
+        stream_ = nullptr;
+        stream_mode_.store(StreamMode::NONE);
     }
+
+    // リングバッファを新フォーマットで 2 秒分に再確保
+    const size_t buf_bytes =
+        static_cast<size_t>(new_info.sample_rate)
+        * static_cast<size_t>(new_info.bytes_per_frame)
+        * 2u;
+    ring_buf_ = std::make_unique<LockFreeRingBuffer>(buf_bytes);
 
     ring_buf_->Flush();
     decoder_      = std::move(dec);
-    UpdateCurrentInfo(new_info);   // mutex + atomic を一括更新
+    UpdateCurrentInfo(new_info);
     position_.store(0);
+
+    if (!OpenStream(new_info.sample_rate, new_info.aaudio_format, new_info.channels)) {
+        return false;
+    }
+    AAudioStream_requestStart(stream_);
 
     if (on_track_changed_) on_track_changed_(path);
     return true;
