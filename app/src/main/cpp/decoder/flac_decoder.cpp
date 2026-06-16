@@ -176,8 +176,15 @@ int64_t FlacDecoder::Decode(void* buf, size_t max_frames) {
     std::memcpy(buf, staging_.data() + staging_read_, frames_out * info_.bytes_per_frame);
     staging_read_ += frames_out * info_.bytes_per_frame;
 
-    // 消費済みバッファを定期的に整理（バッファが 4MB を超えたら）
-    if (staging_read_ > 4 * 1024 * 1024) {
+    // staging_ 圧縮戦略:
+    //   192kHz/24bit では 1 ブロック = 4096 * 2ch * 4bytes = 32768 bytes。
+    //   旧コードの 4MB 閾値では 2.6 秒ごとに O(4MB) erase が発生し、
+    //   デコーダースレッドが止まってアンダーラン→飛び飛び再生になっていた。
+    //   → 全消費なら即 clear()、残りがあれば 32KB 以上で erase（小さく速い）。
+    if (staging_read_ >= staging_.size()) {
+        staging_.clear();
+        staging_read_ = 0;
+    } else if (staging_read_ > 32768) {
         staging_.erase(staging_.begin(), staging_.begin() + staging_read_);
         staging_read_ = 0;
     }

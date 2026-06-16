@@ -312,7 +312,12 @@ void AudioEngine::DecoderThreadFunc() {
 
         const int64_t n = decoder_->Decode(chunk_buf.data(), kChunkFrames);
         if (n == 0) {
-            // EOF: 自動次曲（current_info_.path を mutex で読む）
+            if (!decoder_->IsAtEOF()) {
+                // コーデックのウォームアップ中 / 一時的にデータなし → 少し待ってリトライ
+                usleep(5000);
+                continue;
+            }
+            // 真の EOF → 自動次曲
             std::string cur_path;
             { std::lock_guard<std::mutex> lock(info_mutex_); cur_path = current_info_.path; }
             const std::string next = FileScanner::GetNextFile(cur_path);

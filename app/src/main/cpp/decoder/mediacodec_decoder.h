@@ -14,6 +14,7 @@ public:
     bool        Seek(uint64_t target_sample) override;
     uint64_t    GetPosition()    const override { return position_; }
     std::string GetLastError()   const override { return last_error_; }
+    bool        IsAtEOF()        const override { return output_eof_; }
 
 private:
     bool DrainOutput();  // コーデックの出力バッファをステージングバッファに移す
