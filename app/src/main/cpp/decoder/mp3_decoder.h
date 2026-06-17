@@ -21,9 +21,8 @@ public:
     bool             Seek(uint64_t target_sample) override;
     uint64_t         GetPosition()   const override { return position_; }
     std::string      GetLastError()  const override { return last_error_; }
-    bool             IsAtEOF()       const override {
-        return impl_ && impl_->opened && position_ >= info_.total_samples;
-    }
+    // 実装は mp3_decoder.cpp（Mp3DecoderImpl の定義後）に記述
+    bool             IsAtEOF()       const override;
 
 private:
     std::unique_ptr<Mp3DecoderImpl> impl_;   // minimp3 の実装を隠蔽

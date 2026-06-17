@@ -80,3 +80,8 @@ bool Mp3Decoder::Seek(uint64_t target_sample) {
     position_ = target_sample;
     return true;
 }
+
+bool Mp3Decoder::IsAtEOF() const {
+    // Mp3DecoderImpl の完全定義がある .cpp 内で実装（ヘッダーの前方宣言では不可）
+    return impl_ && impl_->opened && position_ >= info_.total_samples;
+}
